@@ -1,6 +1,9 @@
+let dbInitialized = false;
+
 export async function initDatabase(db) {
+  if (dbInitialized) return;
+  
   try {
-    // 基础设置表
     await db.prepare(`
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY, 
@@ -122,12 +125,12 @@ export async function initDatabase(db) {
     }
 
     console.log('✅ 数据库初始化完成');
+    dbInitialized = true;
   } catch (e) {
     console.error('❌ 数据库初始化失败:', e);
   }
 }
 
-// 清理超过7天的历史数据
 export async function cleanupOldData(db) {
   try {
     const lastClean = await db.prepare(`SELECT value FROM settings WHERE key = 'last_cleanup'`).first();
@@ -136,11 +139,9 @@ export async function cleanupOldData(db) {
     
     if (!lastClean || (now - parseInt(lastClean.value)) > oneDay) {
       const cutoff = now - 7 * oneDay;
-      const deleteResult = await db.prepare(`DELETE FROM metrics_history WHERE (
-        (typeof(timestamp) = 'integer' AND timestamp < ?)
-        OR 
-        (typeof(timestamp) = 'text' AND timestamp < datetime('now', '-7 days'))
-      )`).bind(cutoff).run();
+      const deleteResult = await db.prepare(
+        `DELETE FROM metrics_history WHERE timestamp < ?`
+      ).bind(cutoff).run();
       
       if (deleteResult.meta.changes > 0) {
         await db.prepare(`

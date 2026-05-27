@@ -1,5 +1,6 @@
 import { saveMetricsHistory } from '../database/schema.js';
 import { checkOfflineNodes } from '../services/notification.js';
+import { loadSettings } from '../utils/settings.js';
 
 export async function handleUpdate(request, env, ctx) {
   try {
@@ -13,7 +14,6 @@ export async function handleUpdate(request, env, ctx) {
     let countryCode = request.cf?.country || 'XX';
     if (countryCode.toUpperCase() === 'TW') countryCode = 'CN';
 
-    // 检查服务器是否存在
     const serverExists = await env.DB.prepare(
       'SELECT * FROM servers WHERE id = ?'
     ).bind(id).first();
@@ -22,7 +22,8 @@ export async function handleUpdate(request, env, ctx) {
       return new Response('Server not found', { status: 404 });
     }
 
-    // 流量累加逻辑
+    const sys = await loadSettings(env.DB);
+
     const nowTime = new Date();
     const tzOffset = 8 * 60 * 60000;
     const localNow = new Date(nowTime.getTime() + tzOffset);
@@ -34,12 +35,7 @@ export async function handleUpdate(request, env, ctx) {
     let last_tx = parseFloat(serverExists.last_tx || '0');
     let reset_month = serverExists.reset_month || currentMonthStr;
 
-    // 加载设置检查是否需要重置流量
-    const sysSettings = await env.DB.prepare(
-      "SELECT value FROM settings WHERE key = 'auto_reset_traffic'"
-    ).first();
-    
-    if (sysSettings?.value === 'true' && currentMonthStr !== reset_month) {
+    if (sys.auto_reset_traffic === 'true' && currentMonthStr !== reset_month) {
       monthly_rx = 0;
       monthly_tx = 0;
       reset_month = currentMonthStr;
@@ -63,7 +59,6 @@ export async function handleUpdate(request, env, ctx) {
     last_rx = current_rx;
     last_tx = current_tx;
 
-    // 更新服务器最新状态
     await env.DB.prepare(`
       UPDATE servers 
       SET cpu = ?, ram = ?, disk = ?, load_avg = ?, uptime = ?, last_updated = ?,
@@ -87,19 +82,9 @@ export async function handleUpdate(request, env, ctx) {
       id
     ).run();
 
-    // ========== 新增：保存历史数据 ==========
     await saveMetricsHistory(env.DB, id, metrics);
 
-    // 异步检查离线节点
-    ctx.waitUntil(checkOfflineNodes(env.DB, {
-      tg_notify: 'true',
-      tg_bot_token: (await env.DB.prepare(
-        "SELECT value FROM settings WHERE key = 'tg_bot_token'"
-      ).first())?.value || '',
-      tg_chat_id: (await env.DB.prepare(
-        "SELECT value FROM settings WHERE key = 'tg_chat_id'"
-      ).first())?.value || ''
-    }));
+    ctx.waitUntil(checkOfflineNodes(env.DB, sys));
 
     return new Response('OK', { status: 200 });
   } catch (e) {

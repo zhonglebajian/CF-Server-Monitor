@@ -1,5 +1,13 @@
 import { checkAuth, authResponse } from '../middleware/auth.js';
 
+function isValidUUID(id) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
+function isValidName(name) {
+  return name && typeof name === 'string' && name.trim().length > 0 && name.length <= 100;
+}
+
 export async function handleAdminAPI(request, env, sys) {
   if (!checkAuth(request, env)) {
     return authResponse(sys.admin_title);
@@ -9,7 +17,6 @@ export async function handleAdminAPI(request, env, sys) {
     const data = await request.json();
     
     if (data.action === 'save_settings') {
-      // 保存全局设置
       for (const [k, v] of Object.entries(data.settings)) {
         await env.DB.prepare(
           'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
@@ -20,9 +27,15 @@ export async function handleAdminAPI(request, env, sys) {
       });
     } 
     else if (data.action === 'add') {
-      // 添加新服务器
-      const id = crypto.randomUUID();
       const name = data.name || 'New Server';
+      if (!isValidName(name)) {
+        return new Response(JSON.stringify({ error: '服务器名称无效' }), { 
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      
+      const id = crypto.randomUUID();
       const group = data.server_group || 'Default';
       
       const { max_order } = await env.DB.prepare('SELECT COALESCE(MAX(sort_order), -1) as max_order FROM servers').first();
@@ -55,16 +68,14 @@ export async function handleAdminAPI(request, env, sys) {
       });
     } 
     else if (data.action === 'delete') {
-      // 删除服务器
       const { id } = data;
-      if (!id) {
-        return new Response(JSON.stringify({ error: '缺少服务器 ID' }), { 
+      if (!id || !isValidUUID(id)) {
+        return new Response(JSON.stringify({ error: '服务器 ID 无效' }), { 
           status: 400,
           headers: { 'Content-Type': 'application/json' }
         });
       }
       
-      // 同时删除历史数据
       await env.DB.prepare('DELETE FROM metrics_history WHERE server_id = ?').bind(id).run();
       await env.DB.prepare('DELETE FROM servers WHERE id = ?').bind(id).run();
       
@@ -73,7 +84,6 @@ export async function handleAdminAPI(request, env, sys) {
       });
     } 
     else if (data.action === 'save_order') {
-      // 保存服务器排序
       const { orders } = data;
       if (!orders || !Array.isArray(orders) || orders.length === 0) {
         return new Response(JSON.stringify({ error: '缺少排序数据' }), { 
@@ -83,6 +93,12 @@ export async function handleAdminAPI(request, env, sys) {
       }
       
       for (let i = 0; i < orders.length; i++) {
+        if (!isValidUUID(orders[i])) {
+          return new Response(JSON.stringify({ error: '排序数据包含无效 ID' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
         await env.DB.prepare('UPDATE servers SET sort_order = ? WHERE id = ?').bind(i, orders[i]).run();
       }
       
@@ -91,10 +107,9 @@ export async function handleAdminAPI(request, env, sys) {
       });
     }
     else if (data.action === 'edit') {
-      // 编辑服务器信息
       const { id, server_group, price, expire_date, bandwidth, traffic_limit, is_hidden } = data;
-      if (!id) {
-        return new Response(JSON.stringify({ error: '缺少服务器 ID' }), { 
+      if (!id || !isValidUUID(id)) {
+        return new Response(JSON.stringify({ error: '服务器 ID 无效' }), { 
           status: 400,
           headers: { 'Content-Type': 'application/json' }
         });
@@ -119,7 +134,6 @@ export async function handleAdminAPI(request, env, sys) {
       });
     }
     else if (data.action === 'batch_delete') {
-      // 批量删除服务器
       const { ids } = data;
       if (!ids || !Array.isArray(ids) || ids.length === 0) {
         return new Response(JSON.stringify({ error: '请选择要删除的服务器' }), { 
@@ -129,9 +143,17 @@ export async function handleAdminAPI(request, env, sys) {
       }
       
       for (const id of ids) {
-        await env.DB.prepare('DELETE FROM metrics_history WHERE server_id = ?').bind(id).run();
-        await env.DB.prepare('DELETE FROM servers WHERE id = ?').bind(id).run();
+        if (!isValidUUID(id)) {
+          return new Response(JSON.stringify({ error: '包含无效的服务器 ID' }), { 
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
       }
+      
+      const placeholders = ids.map(() => '?').join(',');
+      await env.DB.prepare(`DELETE FROM metrics_history WHERE server_id IN (${placeholders})`).bind(...ids).run();
+      await env.DB.prepare(`DELETE FROM servers WHERE id IN (${placeholders})`).bind(...ids).run();
       
       return new Response(JSON.stringify({ 
         success: true, 
@@ -141,7 +163,6 @@ export async function handleAdminAPI(request, env, sys) {
       });
     }
     else if (data.action === 'get_stats') {
-      // 获取统计数据
       const { results: servers } = await env.DB.prepare(
         'SELECT id, name, last_updated, country, cpu, ram, disk, net_in_speed, net_out_speed FROM servers'
       ).all();
@@ -183,8 +204,14 @@ export async function handleAdminAPI(request, env, sys) {
       });
     }
     else if (data.action === 'clean_history') {
-      // 手动清理历史数据
       const days = data.days || 7;
+      if (typeof days !== 'number' || days < 1 || days > 365) {
+        return new Response(JSON.stringify({ error: '天数参数无效' }), { 
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      
       await env.DB.prepare(
         `DELETE FROM metrics_history WHERE timestamp < datetime('now', '-' || ? || ' days')`
       ).bind(days).run();

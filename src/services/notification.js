@@ -1,14 +1,37 @@
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1000;
+
+async function fetchWithRetry(url, options, retries = MAX_RETRIES) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok) return response;
+      
+      if (i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+      }
+    } catch (e) {
+      if (i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+      } else {
+        throw e;
+      }
+    }
+  }
+  throw new Error('Max retries exceeded');
+}
+
 export async function sendTelegramNotification(sys, msg) {
   if (sys.tg_notify !== 'true' || !sys.tg_bot_token || !sys.tg_chat_id) return;
   
   try {
-    await fetch(`https://api.telegram.org/bot${sys.tg_bot_token}/sendMessage`, {
+    await fetchWithRetry(`https://api.telegram.org/bot${sys.tg_bot_token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: sys.tg_chat_id,
         text: msg,
-        parse_mode: 'Markdown'  // 改为 Markdown
+        parse_mode: 'Markdown'
       })
     });
   } catch (e) {
@@ -20,12 +43,12 @@ export async function sendWeworkNotification(sys, msg) {
   if (sys.tg_notify !== 'true' || !sys.tg_bot_token) return;
 
   try {
-    await fetch(sys.tg_bot_token, {
+    await fetchWithRetry(sys.tg_bot_token, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        msgtype: "markdown",  // 改为 markdown
-        markdown: { content: msg }  // 改为 markdown 字段
+        msgtype: "markdown",
+        markdown: { content: msg }
       })
     });
   } catch (e) {

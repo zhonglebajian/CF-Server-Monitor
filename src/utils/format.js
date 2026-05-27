@@ -26,3 +26,18 @@ export function getPingColor(ping) {
   if (p < 200) return '#f59e0b';
   return '#ef4444';
 }
+
+export function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+export function errorResponse(message, status = 400) {
+  return jsonResponse({ error: message }, status);
+}
+
+export function successResponse(message, data = {}) {
+  return jsonResponse({ success: true, message, ...data });
+}

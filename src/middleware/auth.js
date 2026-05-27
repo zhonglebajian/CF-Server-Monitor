@@ -1,8 +1,6 @@
 export function checkAuth(request, env) {
-    
   const authHeader = request.headers.get('Authorization');
   if (!authHeader) {
-    console.log("NO AUTH HEADER");
     return false;
   }
 
@@ -11,7 +9,6 @@ export function checkAuth(request, env) {
   const encoded = parts[1];
 
   if (scheme !== 'Basic' || !encoded) {
-    console.log("BAD SCHEME:", scheme);
     return false;
   }
 
@@ -19,20 +16,16 @@ export function checkAuth(request, env) {
   try {
     decoded = atob(encoded);
   } catch (e) {
-    console.log("BASE64 ERROR");
     return false;
   }
 
   const idx = decoded.indexOf(':');
   if (idx === -1) {
-    console.log("INVALID FORMAT");
     return false;
   }
 
   const username = decoded.slice(0, idx);
   const password = decoded.slice(idx + 1);
-
-  console.log("AUTH:", username, password, env.API_SECRET);
 
   return username === env.API_USER_NAME && password === env.API_SECRET;
 }
